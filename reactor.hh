@@ -19,6 +19,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <iostream>
+#include <unistd.h>
 
 class socket_address;
 class reactor;
@@ -251,19 +252,24 @@ public:
 
     void run();
 
+    void forget(pollable_fd& fd);
+
     friend class pollable_fd;
 };
 
 class pollable_fd {
-protected:
-    explicit pollable_fd(int fd) : fd(fd) {}
-    pollable_fd(const pollable_fd&) = delete;
-    void operator=(const pollable_fd&) = delete;
-    int fd;
-    int events = 0;
-    std::unique_ptr<task> pollin;
-    std::unique_ptr<task> pollout;
-    friend class reactor;
+    public:
+        ~pollable_fd() { r.forget(*this); ::close(fd);  }
+    protected:
+        explicit pollable_fd(reactor& r, int fd) : r(r), fd(fd) {}
+        pollable_fd(const pollable_fd&) = delete;
+        void operator=(const pollable_fd&) = delete;
+        reactor& r;
+        int fd;
+        int events = 0;
+        std::unique_ptr<task> pollin;
+        std::unique_ptr<task> pollout;
+        friend class reactor;
 };
 
 inline
@@ -271,12 +277,12 @@ future<accept_result>
 reactor::accept(pollable_fd& listenfd) {
     promise<accept_result> pr;
     future<accept_result> fut = pr.get_future();
-    epoll_add_in(listenfd, make_task([pr = std::move(pr), lfd = listenfd.fd] () mutable {
+    epoll_add_in(listenfd, make_task([this, pr = std::move(pr), lfd = listenfd.fd] () mutable {
         socket_address sa;
         socklen_t sl = sizeof(&sa.u.sas);
         int fd = ::accept4(lfd, &sa.u.sa, &sl, SOCK_NONBLOCK | SOCK_CLOEXEC);
         assert(fd != -1);
-        pr.set_value(accept_result{std::unique_ptr<pollable_fd>(new pollable_fd(fd)), sa});
+        pr.set_value(accept_result{std::unique_ptr<pollable_fd>(new pollable_fd(*this, fd)), sa});
     }));
     return fut;
 }
@@ -293,6 +299,5 @@ reactor::read_some(pollable_fd& fd, void* buffer, size_t len) {
     }));
     return fut;
 }
-
 
 #endif /* REACTOR_HH_ */

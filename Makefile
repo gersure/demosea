@@ -1,6 +1,5 @@
 
 
-sanitize = -fsanitize=address -fsanitize=leak -fsanitize=undefined
 CXXFLAGS = -std=gnu++1y -g -Wall -O0 -MD -MT $@ -MP -flto $(sanitize)
 
 tests = test-reactor

@@ -7,24 +7,28 @@
 
 #include "reactor.hh"
 #include <iostream>
+#include <thread>
+#include <chrono>
 
 struct test {
     reactor r;
     std::unique_ptr<pollable_fd> listener;
     struct connection {
+        connection(reactor& r, std::unique_ptr<pollable_fd> fd) : r(r), fd(std::move(fd)) {}
         reactor& r;
         std::unique_ptr<pollable_fd> fd;
+        char buffer[8192];
+        void copy_data() {
+            r.read_some(*fd, buffer, sizeof(buffer)).then([this] (future<size_t> fut) {
+                    auto n = fut.get();
+                    std::cout << "got data: " << n << "\n";
+                    });
+        }
     };
     void new_connection(accept_result&& accepted) {
         std::cout << "got connection\n";
-        copy_data(std::move(std::get<0>(accepted)));
-    }
-    void copy_data(std::unique_ptr<pollable_fd> fd) {
-        char buffer[8192];
-        r.read_some(*fd, buffer, sizeof(buffer)).then([this] (future<size_t> fut) {
-            auto n = fut.get();
-            std::cout << "got data: " << n << "\n";
-        });
+        auto c = new connection(r, std::move(std::get<0>(accepted)));
+        c->copy_data();
     }
     void start_accept() {
         r.accept(*listener).then([this] (future<accept_result> fut) {

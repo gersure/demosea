@@ -19,9 +19,16 @@ reactor::~reactor() {
     ::close(_epollfd);
 }
 
+void reactor::forget(pollable_fd& fd) {
+    if (fd.events) {
+        ::epoll_ctl(_epollfd, EPOLL_CTL_DEL, fd.fd, nullptr);
+    }
+}
+
 void reactor::epoll_add_in(pollable_fd& pfd, std::unique_ptr<task> t) {
     auto ctl = pfd.events ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
-    pfd.events |= EPOLLIN | EPOLLONESHOT;
+    pfd.events |= EPOLLIN;// | EPOLLONESHOT;
+    std::cout<<(pfd.events ? "EPOLL_CTL_MOD" : "EPOLL_CTL_ADD")<<std::endl;
     assert(!pfd.pollin);
     pfd.pollin = std::move(t);
     ::epoll_event eevt;
@@ -33,7 +40,7 @@ void reactor::epoll_add_in(pollable_fd& pfd, std::unique_ptr<task> t) {
 
 void reactor::epoll_add_out(pollable_fd& pfd, std::unique_ptr<task> t) {
     auto ctl = pfd.events ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
-    pfd.events |= EPOLLOUT | EPOLLONESHOT;
+    pfd.events |= EPOLLOUT ;//| EPOLLONESHOT;
     assert(!pfd.pollout);
     pfd.pollout = std::move(t);
     ::epoll_event eevt;
@@ -55,7 +62,7 @@ reactor::listen(socket_address sa, listen_options opts)
     int r = ::bind(fd, &sa.u.sa, sizeof(sa.u.sas));
     assert(r != -1);
     ::listen(fd, 100);
-    return std::unique_ptr<pollable_fd>(new pollable_fd(fd));
+    return std::unique_ptr<pollable_fd>(new pollable_fd(*this, fd));
 }
 
 void reactor::run() {
@@ -67,6 +74,8 @@ void reactor::run() {
             auto& evt = eevt[i];
             auto pfd = reinterpret_cast<pollable_fd*>(evt.data.ptr);
             auto events = evt.events;
+            pfd->events = 0;
+            ::epoll_ctl(_epollfd, EPOLL_CTL_DEL, pfd->fd, &evt);
             if (events & EPOLLIN) {
                 auto t = std::move(pfd->pollin);
                 t->run();
